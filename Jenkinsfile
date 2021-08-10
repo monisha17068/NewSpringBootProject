@@ -36,8 +36,7 @@ git branch: 'main', credentialsId: '28a05ef9-3b3c-4466-847a-0a6a0edce8b5', url: 
           }
          stage('docker') {
             steps {
-                
-           sh 'docker build -t springbootemp:1.6 .'
+                 sh 'docker build -t springbootemp:1.6 .'
            sh 'docker run -d -p 8087:8080 springbootemp:1.6'
         }
     }
