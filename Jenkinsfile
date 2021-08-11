@@ -1,53 +1,87 @@
 pipeline {
+
     agent any
-
-     environment
-    {
-    PATH="/usr/share/maven:$PATH"
    
-    }
-    
 
-     stages {
-        stage('git') {
-            steps {
+    environment {
+        // This can be nexus3 or nexus2
+        NEXUS_VERSION = "nexus3"
+        // This can be http or https
+        NEXUS_PROTOCOL = "http"
+        // Where your Nexus is running
+        NEXUS_URL = "http://35.244.12.68:8081/"
+        // Repository where we will upload the artifact
+        NEXUS_REPOSITORY = "spring"
+        // Jenkins credential id to authenticate to Nexus OSS
+        NEXUS_CREDENTIAL_ID = "nexus-credentials"
+    }
 
-git branch: 'main', credentialsId: '28a05ef9-3b3c-4466-847a-0a6a0edce8b5', url: 'https://github.com/monisha17068/NewSpringBootProject.git'
-}
-}
-         stage('build') {
+    stages {
+        stage("clone code") {
             steps {
-           sh 'mvn clean install -DskipTests'
+                script {
+                    // Let's clone the source
+                    git 'https://github.com/monisha17068/NewSpringBootProject';
+                }
+            }
         }
-    }
-         stage('sonar') 
-          {
-    
-        steps
-     {
-        
-   withSonarQubeEnv('sonarqube') {
-    sh "mvn sonar:sonar \
-  -Dsonar.projectKey=springemp \
-  -Dsonar.host.url=http://34.93.225.134:9000 \
-  -Dsonar.login=cb6ece6c8202fd3523fca5f01635e2e4647a2d90 "
-}
-}
-          }
-         stage('docker') {
+
+        stage("mvn build") {
             steps {
-                 sh 'docker build -t springbootemp:1.6 .'
-           sh 'docker run -d -p 8087:8080 springbootemp:1.6'
+                script {
+                    // If you are using Windows then you should use "bat" step
+                    // Since unit testing is out of the scope we skip them
+                    sh "mvn package -DskipTests=true"
+                }
+            }
         }
+
+        stage("publish to nexus") {
+            steps {
+                script {
+                    // Read POM xml file using 'readMavenPom' step , this step 'readMavenPom' is included in: https://plugins.jenkins.io/pipeline-utility-steps
+                    pom = readMavenPom file: "pom.xml";
+                    // Find built artifact under target folder
+                    filesByGlob = findFiles(glob: "target/*.${pom.packaging}");
+                    // Print some info from the artifact found
+                    echo "${filesByGlob[0].name} ${filesByGlob[0].path} ${filesByGlob[0].directory} ${filesByGlob[0].length} ${filesByGlob[0].lastModified}"
+                    // Extract the path from the File found
+                    artifactPath = filesByGlob[0].path;
+                    // Assign to a boolean response verifying If the artifact name exists
+                    artifactExists = fileExists artifactPath;
+
+                    if(artifactExists) {
+                        echo "*** File: ${artifactPath}, group: ${pom.groupId}, packaging: ${pom.packaging}, version ${pom.version}";
+
+                        nexusArtifactUploader(
+                            nexusVersion: NEXUS_VERSION,
+                            protocol: NEXUS_PROTOCOL,
+                            nexusUrl: NEXUS_URL,
+                            groupId: pom.groupId,
+                            version: pom.version,
+                            repository: NEXUS_REPOSITORY,
+                            credentialsId: NEXUS_CREDENTIAL_ID,
+                            artifacts: [
+                                // Artifact generated such as .jar, .ear and .war files.
+                                [artifactId: pom.artifactId,
+                                classifier: '',
+                                file: artifactPath,
+                                type: pom.packaging],
+
+                                // Lets upload the pom.xml file for additional information for Transitive dependencies
+                                [artifactId: pom.artifactId,
+                                classifier: '',
+                                file: "pom.xml",
+                                type: "pom"]
+                            ]
+                        );
+
+                    } else {
+                        error "*** File: ${artifactPath}, could not be found";
+                    }
+                }
+            }
+        }
+
     }
-         }
- post {
-        always {
-            
-            
-            emailext body: "${currentBuild.currentResult}: Job ${env.JOB_NAME} build ${env.BUILD_NUMBER}\n More info at: ${env.BUILD_URL}",
-                recipientProviders: [[$class: 'DevelopersRecipientProvider'], [$class: 'RequesterRecipientProvider']],
-                subject: "Jenkins Build ${currentBuild.currentResult}: Job ${env.JOB_NAME}"
-  }
- }
 }
